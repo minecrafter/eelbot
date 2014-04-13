@@ -30,12 +30,12 @@ import "sync"
 
 func main() {
 	fmt.Println("*** eelbot by TeapotDev (Minecraft 1.7.2-1.7.5) ***")
-	proxy := flag.String("proxy", "127.0.0.1:25588", "proxy address")
-	target := flag.String("target", "127.0.0.1:25565", "server address")
-	count := flag.Int("count", 10, "count of bots")
-	joindelay := flag.Int("joind", 0, "timeout between bot joins in millis")
-	errdelay := flag.Int("errd", 4100, "timeout in millis if client was kicked while connecting")
-	eeldelay := flag.Int("eeld", 100, "eel timeout (snake)")
+	proxy := flag.String("proxy", "127.0.0.1:25588", "proxy address (client is connecting to it)")
+	target := flag.String("target", "127.0.0.1:25565", "target server address")
+	count := flag.Int("count", 10, "amount of bots to be connected")
+	joindelay := flag.Int("joind", 0, "timeout between bot joins in milliseconds")
+	errdelay := flag.Int("errd", 4100, "timeout in milliseconds if client was kicked while connecting")
+	eeldelay := flag.Int("eeld", 100, "timeout between bots' actions (snake effect)")
 	flag.Parse()
 
 	listener, err := net.Listen("tcp", *proxy)
