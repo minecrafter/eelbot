@@ -58,6 +58,7 @@ func main() {
 			continue
 		}
 		reader = bufio.NewReader(conn)
+		writer = bufio.NewWriter(conn)
 
 		// C->S 0x00 Handshake
 		id, err := readHeader(reader)
@@ -80,8 +81,8 @@ func main() {
 				conn.Close()
 				continue
 			}
-			fmt.Println("# Ignoring status query, waiting for next client...")
-			conn.Close()
+			fmt.Println("# Status query!")
+			go handleStatus(conn, reader, writer, protocolVersion, *count)
 			continue
 		}
 
@@ -98,8 +99,6 @@ func main() {
 			continue
 		}
 		readVarString(reader, 64)
-
-		writer = bufio.NewWriter(conn)
 		break
 	}
 
@@ -107,15 +106,14 @@ func main() {
 	writeVarInt(packetbuf, 0x02)
 	writeVarString(packetbuf, "eel")
 	writeVarString(packetbuf, "eel")
-	err = writePacketBuf(writer, packetbuf)
-	if err != nil {
+	if err = writePacketBuf(writer, packetbuf); err != nil {
 		fmt.Println("## Error sending to client: " + err.Error())
 		os.Exit(1)
 	}
 
 	keepAliveStop := make(chan int)
 	keepAliveStopped := make(chan int)
-	go keepAlive(writer, keepAliveStop, keepAliveStopped)
+	go keepAlive(writer, keepAliveStop, keepAliveStopped, true)
 
 	var firstReader *bufio.Reader // one of bots is client (main bot)
 	otherWriters := make([]*bufio.Writer, *count)
@@ -190,7 +188,7 @@ func main() {
 			firstReader = otherReader
 		}
 		otherWriters[i] = otherWriter
-		go keepAlive(otherWriter, keepAliveStop, keepAliveStopped)
+		go keepAlive(otherWriter, keepAliveStop, keepAliveStopped, false)
 		time.Sleep(time.Duration(*joindelay) * time.Millisecond)
 	}
 
@@ -276,7 +274,7 @@ func randomNick() string {
 	return hex.EncodeToString(buf)
 }
 
-func keepAlive(writer *bufio.Writer, stop, stopped chan int) { // used to keep alive while connecting other bots
+func keepAlive(writer *bufio.Writer, stop, stopped chan int, quitOnErr bool) { // used to keep alive while connecting other bots
 	ticker := time.NewTicker(time.Second)
 	defer func() {
 		ticker.Stop()
@@ -292,6 +290,9 @@ func keepAlive(writer *bufio.Writer, stop, stopped chan int) { // used to keep a
 		writeByte(writer, 5) // packet length
 		writeByte(writer, 0) // packet id
 		writeInt(writer, i)  // keep alive id
-		writer.Flush()
+		if err := writer.Flush(); quitOnErr && err != nil {
+			fmt.Println("## Error while sending keep alive: " + err.Error())
+			os.Exit(1)
+		}
 	}
 }

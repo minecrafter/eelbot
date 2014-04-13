@@ -41,5 +41,4 @@ Todo
 
 * fix lags, when there are a lot of bots
 * entity id translator
-* status support for proxy
 * changing nicknames?
