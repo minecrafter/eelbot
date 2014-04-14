@@ -251,17 +251,25 @@ func main() {
 		firstWriter.Write(buffer)
 		firstWriter.Flush()
 
-		go func() {
-			// writing packet to other bots with timeout
-			for i, otherWriter := range otherWriters {
-				time.Sleep(eelDuration)
-				mutexes[i].Lock()
+		// writing packet to other bots with timeout
+		if *eeldelay > 0 {
+			go func() {
+				for i, otherWriter := range otherWriters {
+					time.Sleep(eelDuration)
+					mutexes[i].Lock()
+					writeVarInt(otherWriter, length)
+					otherWriter.Write(buffer)
+					otherWriter.Flush()
+					mutexes[i].Unlock()
+				}
+			}()
+		} else {
+			for _, otherWriter := range otherWriters {
 				writeVarInt(otherWriter, length)
 				otherWriter.Write(buffer)
 				otherWriter.Flush()
-				mutexes[i].Unlock()
 			}
-		}()
+		}
 	}
 }
 
