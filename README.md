@@ -6,6 +6,8 @@ I NO LONGER DEVELOP EELBOT
 
 Minimalist "snake" bots for testing Minecraft servers. Program works as a proxy. When you are joining, the proxy connects specified amount of bots to server. You are controlling all of them at once in standard Minecraft client.
 
+[![Build Status](https://secure.travis-ci.org/Teapot418/eelbot.svg?branch=master)](http://travis-ci.org/Teapot418/eelbot)
+
 Compiling
 ---------
 

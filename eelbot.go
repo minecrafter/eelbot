@@ -15,7 +15,7 @@ import "sync"
 const PROTOCOL18 = 47
 
 func main() {
-	fmt.Println("*** eelbot by TeapotDev (Minecraft 1.7.2-1.8) ***")
+	fmt.Println("*** eelbot by TeapotDev (Minecraft 1.7.2-1.8.x) ***")
 	proxy := flag.String("proxy", "127.0.0.1:25588", "proxy address (client is connecting to it)")
 	target := flag.String("target", "127.0.0.1:25565", "target server address")
 	count := flag.Int("count", 10, "amount of bots to be connected")
