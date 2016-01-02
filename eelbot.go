@@ -1,19 +1,3 @@
-/*
-   Copyright 2014 TeapotDev
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
-
 package main
 
 import "flag"
@@ -28,15 +12,24 @@ import "os"
 import "io"
 import "sync"
 
+const PROTOCOL18 = 47
+
 func main() {
-	fmt.Println("*** eelbot by TeapotDev (Minecraft 1.7.2-1.7.5) ***")
+	fmt.Println("*** eelbot by TeapotDev (Minecraft 1.7.2-1.8) ***")
 	proxy := flag.String("proxy", "127.0.0.1:25588", "proxy address (client is connecting to it)")
 	target := flag.String("target", "127.0.0.1:25565", "target server address")
 	count := flag.Int("count", 10, "amount of bots to be connected")
 	joindelay := flag.Int("joind", 0, "timeout between bot joins in milliseconds")
 	errdelay := flag.Int("errd", 4100, "timeout in milliseconds if client was kicked while connecting")
 	eeldelay := flag.Int("eeld", 100, "timeout between bots' actions (snake effect)")
+	keepConn := flag.Bool("keep", false, "keeps connections after main client disconnects")
+	ver18 := flag.Bool("ver18", false, "use 1.8+ version (packet compression)")
 	flag.Parse()
+
+	protocol := 0
+	if *ver18 {
+		protocol = PROTOCOL18
+	}
 
 	listener, err := net.Listen("tcp", *proxy)
 	if err != nil {
@@ -104,7 +97,7 @@ func main() {
 
 	// S->C Login success
 	writeVarInt(packetbuf, 0x02)
-	writeVarString(packetbuf, "eel")
+	writeVarString(packetbuf, "069a79f4-44e9-4726-a5be-fca90e38aaf5")
 	writeVarString(packetbuf, "eel")
 	if err = writePacketBuf(writer, packetbuf); err != nil {
 		fmt.Println("## Error sending to client: " + err.Error())
@@ -113,10 +106,15 @@ func main() {
 
 	keepAliveStop := make(chan int)
 	keepAliveStopped := make(chan int)
-	go keepAlive(writer, keepAliveStop, keepAliveStopped, true)
+	go keepAlive(writer, keepAliveStop, keepAliveStopped, true, true, protocol, nil)
 
 	var firstReader *bufio.Reader // one of bots is client (main bot)
 	otherWriters := make([]*bufio.Writer, *count)
+
+	mutexes := make([]*sync.Mutex, len(otherWriters))
+	for i := 0; i < len(mutexes); i++ {
+		mutexes[i] = new(sync.Mutex)
+	}
 
 	fmt.Println("## Client connected to proxy! Connecting eel to target...")
 	for i := 0; i < *count; i++ {
@@ -168,7 +166,18 @@ func main() {
 			continue
 		}
 		if id != 0x02 {
-			fmt.Printf("# Error connecting %d: unexpected packet\n", i+1)
+			if id == 0x00 { // disconnect
+				reason, err := readVarString(otherReader, 512)
+				if err == nil {
+					fmt.Printf("# Error connecting %d: kicked: %s\n", i+1, reason)
+				} else {
+					fmt.Printf("# Error connecting %d: %s\n", i+1, err.Error())
+				}
+			} else if id == 0x01 { // encryption request
+				fmt.Printf("# Error connecting %d: online mode not supported\n", i+1)
+			} else {
+				fmt.Printf("# Error connecting %d: unexpected packet\n", i+1)
+			}
 			time.Sleep(time.Duration(*errdelay) * time.Millisecond)
 			other.Close()
 			i--
@@ -186,27 +195,20 @@ func main() {
 
 		if firstReader == nil {
 			firstReader = otherReader
+		} else {
+			go dummyRead(otherReader)
 		}
 		otherWriters[i] = otherWriter
-		go keepAlive(otherWriter, keepAliveStop, keepAliveStopped, false)
+		go keepAlive(otherWriter, nil, keepAliveStopped, false, false, protocol, mutexes[i])
 		time.Sleep(time.Duration(*joindelay) * time.Millisecond)
 	}
 
 	firstWriter := otherWriters[0] // main bot
 	otherWriters = otherWriters[1:]
 
-	mutexes := make([]*sync.Mutex, len(otherWriters))
-	for i := 0; i < len(mutexes); i++ {
-		mutexes[i] = new(sync.Mutex)
-	}
-
 	// stopping async keep alive
-	for i := 0; i < *count+1; i++ { // count of bots + client connected to proxy
-		keepAliveStop <- 1
-	}
-	for i := 0; i < *count+1; i++ {
-		<-keepAliveStopped
-	}
+	keepAliveStop <- 1
+	<-keepAliveStopped
 
 	go func() {
 		var buffer [2048]byte
@@ -215,18 +217,22 @@ func main() {
 			count, err := firstReader.Read(buffer[:])
 			if err != nil {
 				fmt.Println("# Error reading from main connection:", err.Error())
-				os.Exit(1)
+				break
 			}
 			_, err = writer.Write(buffer[:count])
 			if err != nil {
 				fmt.Println("# Error writing to main connection:", err.Error())
-				os.Exit(1)
+				break
 			}
 			err = writer.Flush()
 			if err != nil {
 				fmt.Println("# Error writing to main connection:", err.Error())
-				os.Exit(1)
+				break
 			}
+		}
+
+		if !(*keepConn) {
+			os.Exit(0)
 		}
 	}()
 
@@ -237,30 +243,32 @@ func main() {
 		length, err := readVarInt(reader)
 		if err != nil {
 			fmt.Println("# Error reading from main connection:", err.Error())
-			os.Exit(1)
+			break
 		}
 		buffer := make([]byte, length)
 		_, err = io.ReadFull(reader, buffer)
 		if err != nil {
 			fmt.Println("# Error reading from main connection:", err.Error())
-			os.Exit(1)
+			break
 		}
 
 		// writing packet to main bot
+		mutexes[0].Lock()
 		writeVarInt(firstWriter, length)
 		firstWriter.Write(buffer)
 		firstWriter.Flush()
+		mutexes[0].Unlock()
 
 		// writing packet to other bots with timeout
 		if *eeldelay > 0 {
 			go func() {
 				for i, otherWriter := range otherWriters {
 					time.Sleep(eelDuration)
-					mutexes[i].Lock()
+					mutexes[i+1].Lock()
 					writeVarInt(otherWriter, length)
 					otherWriter.Write(buffer)
 					otherWriter.Flush()
-					mutexes[i].Unlock()
+					mutexes[i+1].Unlock()
 				}
 			}()
 		} else {
@@ -268,6 +276,22 @@ func main() {
 				writeVarInt(otherWriter, length)
 				otherWriter.Write(buffer)
 				otherWriter.Flush()
+			}
+		}
+	}
+
+	if *keepConn {
+		for j := int32(0); ; j++ {
+			time.Sleep(5 * time.Second)
+
+			writeKeepAlive(firstWriter, false, protocol)
+			firstWriter.Flush()
+
+			for i, otherWriter := range otherWriters {
+				mutexes[i].Lock()
+				writeKeepAlive(otherWriter, false, protocol)
+				otherWriter.Flush()
+				mutexes[i].Unlock()
 			}
 		}
 	}
@@ -282,25 +306,61 @@ func randomNick() string {
 	return hex.EncodeToString(buf)
 }
 
-func keepAlive(writer *bufio.Writer, stop, stopped chan int, quitOnErr bool) { // used to keep alive while connecting other bots
-	ticker := time.NewTicker(time.Second)
+func keepAlive(writer *bufio.Writer, stop, stopped chan int, quitOnErr, toClient bool, protocol int, mutex *sync.Mutex) { // used to keep alive while connecting other bots
+	ticker := time.NewTicker(5 * time.Second)
 	defer func() {
 		ticker.Stop()
-		stopped <- 1
+		if stopped != nil {
+			stopped <- 1
+		}
 	}()
-	for i := int32(1); ; i++ {
+	for {
 		select {
 		case <-ticker.C:
 		case <-stop:
 			return
 		}
-		// C->S 0x00 Keep alive
-		writeByte(writer, 5) // packet length
-		writeByte(writer, 0) // packet id
-		writeInt(writer, i)  // keep alive id
+
+		if mutex != nil {
+			mutex.Lock()
+		}
+
+		writeKeepAlive(writer, toClient, protocol)
 		if err := writer.Flush(); quitOnErr && err != nil {
 			fmt.Println("## Error while sending keep alive: " + err.Error())
-			os.Exit(1)
+			if mutex != nil {
+				mutex.Unlock()
+			}
+			return
+		}
+
+		if mutex != nil {
+			mutex.Unlock()
+		}
+	}
+}
+
+func writeKeepAlive(writer *bufio.Writer, toClient bool, protocol int) {
+	if !toClient && protocol >= 47 {
+		writeByte(writer, 3) // packet length
+		writeByte(writer, 0) // compressed length
+	} else {
+		writeByte(writer, 2) // packet length
+	}
+	writeByte(writer, 0) // packet id
+	if protocol >= 47 {
+		writeByte(writer, 0) // keep alive id
+	} else {
+		writeInt(writer, 0) // keep alive id
+	}
+}
+
+func dummyRead(reader io.Reader) {
+	var buf [4096]byte
+	for {
+		_, err := reader.Read(buf[:])
+		if err != nil {
+			return
 		}
 	}
 }
