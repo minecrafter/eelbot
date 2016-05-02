@@ -345,7 +345,7 @@ func writeKeepAlive(writer *bufio.Writer, toClient bool, protocol int) {
 		writeByte(writer, 3) // packet length
 		writeByte(writer, 0) // compressed length
 	} else {
-		writeByte(writer, 2) // packet length
+		writeByte(writer, 5) // packet length
 	}
 	writeByte(writer, 0) // packet id
 	if protocol >= 47 {
